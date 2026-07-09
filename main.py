@@ -2,38 +2,36 @@ import pandas as pd
 
 def analyze_and_export_missing_calls(inventory_csv, calls_csv, output_csv):
     # 1. Load the data
-    inv_df = pd.read_csv(inventory_csv)
-    calls_df = pd.read_csv(calls_csv)
+    inv_df = pd.read_csv(inventory_csv, low_memory=False)
+    calls_df = pd.read_csv(calls_csv, low_memory=False)
 
     # 2. Clean the 'Count' column
-    # First, fill any NaN/empty values with '0'
-    calls_df['Count'] = calls_df['Count'].fillna('0')
-    
-    # Then remove commas and convert to integer
-    if calls_df['Count'].dtype == 'O': # Check if it's object/string type
-        calls_df['Count'] = calls_df['Count'].astype(str).str.replace(',', '').astype(int)
-    else:
-        # If it's already numeric but has NaNs, fillna(0) makes them floats, so we cast to int
-        calls_df['Count'] = calls_df['Count'].astype(int)
+    # Force everything to string, remove commas, coerce to numeric (making bad values NaN), fill NaN with 0, and cast to int.
+    calls_df['Count'] = calls_df['Count'].astype(str).str.replace(',', '', regex=False)
+    calls_df['Count'] = pd.to_numeric(calls_df['Count'], errors='coerce').fillna(0).astype(int)
 
-    # Clean the phone numbers (strip spaces)
-    inv_df['Did'] = inv_df['Did'].astype(str).str.strip()
-    calls_df['Caller'] = calls_df['Caller'].astype(str).str.strip()
+    # 3. Clean and NORMALIZE the phone numbers
+    # Convert to string, strip spaces, and remove the '+' sign if it exists
+    inv_df['Did'] = inv_df['Did'].astype(str).str.strip().str.replace('+', '', regex=False)
+    calls_df['Caller_Normalized'] = calls_df['Caller'].astype(str).str.strip().str.replace('+', '', regex=False)
 
-    # 3. Identify inventory DIDs
+    # 4. Identify inventory DIDs using the normalized format
     inventory_dids = set(inv_df['Did'].unique())
 
-    # 4. Filter for callers NOT in the inventory
-    not_in_inventory = calls_df[~calls_df['Caller'].isin(inventory_dids)].copy()
+    # 5. Filter for callers NOT in the inventory (using the normalized column for comparison)
+    not_in_inventory = calls_df[~calls_df['Caller_Normalized'].isin(inventory_dids)].copy()
 
     # Sort the missing ones by Count descending
     not_in_inventory = not_in_inventory.sort_values(by='Count', ascending=False)
 
-    # 5. Save the detailed breakdown to a new CSV file
+    # Clean up the dataframe before exporting (drop the temporary normalized column)
+    not_in_inventory = not_in_inventory.drop(columns=['Caller_Normalized'])
+
+    # 6. Save the detailed breakdown to a new CSV file
     not_in_inventory.to_csv(output_csv, index=False)
     print(f"\n[SUCCESS] Exported detailed breakdown to '{output_csv}'\n")
 
-    # 6. Compute summaries
+    # 7. Compute summaries
     total_calls_missing = not_in_inventory['Count'].sum()
     total_unique_missing_callers = not_in_inventory['Caller'].nunique()
 
